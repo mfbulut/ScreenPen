@@ -1,11 +1,15 @@
 #include "raylib.h"
 #include "raymath.h"
 
-#define DRAWING_MODE_WIDTH 1920
-#define DRAWING_MODE_HEIGHT 1075
+#define DESIGN_HEIGHT 1080
 
 #define TOUCH_MODE_WIDTH 100
 #define TOUCH_MODE_HEIGHT 800
+
+int screenWidth = 1920;
+int screenHeight = 1080;
+float uiScale = 1.0f;
+Vector2 monitorPosition = { 0, 0 };
 
 typedef enum {
     MODE_DRAW,
@@ -48,10 +52,26 @@ bool Button(Rectangle rect, Color buttonColor, int iconID) {
 int main() {
     AppMode currentMode = MODE_DRAW;
 
-    SetConfigFlags(FLAG_WINDOW_UNDECORATED | FLAG_WINDOW_TRANSPARENT | FLAG_WINDOW_TOPMOST);
-    InitWindow(DRAWING_MODE_WIDTH, DRAWING_MODE_HEIGHT, "Freaky Draw");
+    SetConfigFlags(FLAG_WINDOW_UNDECORATED | FLAG_WINDOW_TRANSPARENT | FLAG_WINDOW_TOPMOST | FLAG_WINDOW_HIDDEN);
+    InitWindow(320, 240, "Freaky Draw");
+
+    // NOTE: The window must be shown before it is resized, otherwise Windows
+    // loses the transparent framebuffer and the window turns black.
+    ClearWindowState(FLAG_WINDOW_HIDDEN);
+
+    int monitor = GetCurrentMonitor();
+    screenWidth = GetMonitorWidth(monitor);
+    screenHeight = GetMonitorHeight(monitor);
+    monitorPosition = GetMonitorPosition(monitor);
+
+    if (screenWidth <= 0) screenWidth = 1920;
+    if (screenHeight <= 0) screenHeight = 1080;
+
+    uiScale = (float)screenHeight / DESIGN_HEIGHT;
+
+    SetWindowSize(screenWidth, screenHeight);
+    SetWindowPosition((int)monitorPosition.x, (int)monitorPosition.y);
     SetTargetFPS(60);
-    SetWindowPosition(0, 0);
 
     icons[0] = LoadTexture("assets/drag.png");
     icons[1] = LoadTexture("assets/trash.png");
@@ -71,7 +91,7 @@ int main() {
     SetTextureFilter(icons[3], TEXTURE_FILTER_TRILINEAR);
     SetTextureFilter(icons[4], TEXTURE_FILTER_TRILINEAR);
 
-    RenderTexture2D canvas = LoadRenderTexture(DRAWING_MODE_WIDTH, DRAWING_MODE_HEIGHT);
+    RenderTexture2D canvas = LoadRenderTexture(screenWidth, screenHeight);
 
     BeginTextureMode(canvas);
     ClearBackground(BLANK);
@@ -96,7 +116,7 @@ int main() {
     uiCamera.offset = (Vector2){ 0, 0 };
     uiCamera.target = (Vector2){ 0, 0 };
     uiCamera.rotation = 0.0f;
-    uiCamera.zoom = 1.0f;
+    uiCamera.zoom = uiScale;
 
     bool isDragging = false;
     Vector2 dragOffset = { 0 };
@@ -127,12 +147,14 @@ int main() {
         if (isDragging) {
             if (IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
                 if (currentMode == MODE_DRAW) {
-                    uiCamera.offset.x = Clamp(mousePos.x - dragOffset.x, 0, 1820);
-                    uiCamera.offset.y = Clamp(mousePos.y - dragOffset.y, 0, 280);
+                    uiCamera.offset.x = Clamp(mousePos.x - dragOffset.x, 0, screenWidth - TOUCH_MODE_WIDTH * uiScale);
+                    uiCamera.offset.y = Clamp(mousePos.y - dragOffset.y, 0, screenHeight - TOUCH_MODE_HEIGHT * uiScale);
                 } else {
                     Vector2 delta = {mousePos.x - prevMousePosition.x, mousePos.y - prevMousePosition.y};
                     Vector2 windowPos = {GetWindowPosition().x + delta.x, GetWindowPosition().y + delta.y};
-                    SetWindowPosition((int)Clamp(windowPos.x, 0, DRAWING_MODE_WIDTH - 100), (int)Clamp(windowPos.y, 0, DRAWING_MODE_HEIGHT - 800));
+                    SetWindowPosition(
+                        (int)Clamp(windowPos.x, monitorPosition.x, monitorPosition.x + screenWidth - TOUCH_MODE_WIDTH * uiScale),
+                        (int)Clamp(windowPos.y, monitorPosition.y, monitorPosition.y + screenHeight - TOUCH_MODE_HEIGHT * uiScale));
                 }
             } else {
                 isDragging = false;
@@ -146,14 +168,15 @@ int main() {
             }
 
             BeginTextureMode(canvas);
+            float strokeSize = brushSize * uiScale;
             if (eraser) {
                 BeginBlendMode(BLEND_SUBTRACT_COLORS);
-                DrawLineEx(lastMousePos, mousePos, brushSize * 8, BLANK);
-                DrawCircleV(mousePos, brushSize * 4, BLANK);
+                DrawLineEx(lastMousePos, mousePos, strokeSize * 8, BLANK);
+                DrawCircleV(mousePos, strokeSize * 4, BLANK);
                 EndBlendMode();
             } else {
-                DrawLineEx(lastMousePos, mousePos, brushSize, brushColor);
-                DrawCircleV(mousePos, brushSize / 2, brushColor);
+                DrawLineEx(lastMousePos, mousePos, strokeSize, brushColor);
+                DrawCircleV(mousePos, strokeSize / 2, brushColor);
             }
 
             EndTextureMode();
@@ -199,14 +222,17 @@ int main() {
         if (Button(touchButton, currentMode == MODE_TOUCH ? (Color){40, 120, 60, 255} : BUTTON_COLOR, 3)) {
             if (currentMode == MODE_DRAW) {
                 currentMode = MODE_TOUCH;
-                SetWindowSize(TOUCH_MODE_WIDTH, TOUCH_MODE_HEIGHT);
-                SetWindowPosition(uiCamera.offset.x,  uiCamera.offset.y);
+                SetWindowSize((int)(TOUCH_MODE_WIDTH * uiScale), (int)(TOUCH_MODE_HEIGHT * uiScale));
+                SetWindowPosition((int)(monitorPosition.x + uiCamera.offset.x), (int)(monitorPosition.y + uiCamera.offset.y));
                 uiCamera.offset = (Vector2){ 0, 0 };
             } else {
                 currentMode = MODE_DRAW;
-                SetWindowSize(DRAWING_MODE_WIDTH, DRAWING_MODE_HEIGHT);
-                uiCamera.offset = GetWindowPosition();
-                SetWindowPosition(0, 0);
+                Vector2 windowPos = GetWindowPosition();
+                Vector2 toolbarPos = { windowPos.x - monitorPosition.x, windowPos.y - monitorPosition.y };
+                SetWindowSize(screenWidth, screenHeight);
+                SetWindowPosition((int)monitorPosition.x, (int)monitorPosition.y);
+                uiCamera.offset.x = Clamp(toolbarPos.x, 0, screenWidth - TOUCH_MODE_WIDTH * uiScale);
+                uiCamera.offset.y = Clamp(toolbarPos.y, 0, screenHeight - TOUCH_MODE_HEIGHT * uiScale);
             }
         }
 
@@ -232,8 +258,8 @@ int main() {
         EndMode2D();
 
         if(eraser && IsMouseButtonDown(MOUSE_LEFT_BUTTON) && !isDragging && !CheckCollisionPointRec(worldMousePos, (Rectangle){ 0, 0, TOUCH_MODE_WIDTH, TOUCH_MODE_HEIGHT })){
-            DrawCircleLinesV(mousePos, brushSize * 4, WHITE);
-            DrawCircleLinesV(mousePos, brushSize * 4 + 1, BLACK);
+            DrawCircleLinesV(mousePos, brushSize * 4 * uiScale, WHITE);
+            DrawCircleLinesV(mousePos, brushSize * 4 * uiScale + 1, BLACK);
         }
 
         EndDrawing();
